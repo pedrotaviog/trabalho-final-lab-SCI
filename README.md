@@ -11,8 +11,8 @@ O sistema utiliza **PWM** para atuação e **ADC** para leitura do tacogerador, 
   - **Malha Aberta**: Ajuste direto de Duty Cycle.
   - **Malha Fechada**: Seleção de **Setpoint** (Tensão Desejada).
 - **Estratégias de Controle Embarcadas**:
-  - 🟢 **PI (Síntese Direta)**: Com filtro de referência.
-  - 🔵 **Polinomial (RST)**: Alocação de polos via Equação Diofantina.
+  - **PI (Síntese Direta)**: Com filtro de referência.
+  - **Polinomial (RST)**: Alocação de polos via Equação Diofantina.
 - **Tratamento de Sinal e Atuador**:
   - Filtro digital para leitura do sensor.
   - Rotina de **Anti-windup** (Clamping) para saturação do PWM.
@@ -29,9 +29,8 @@ O sistema utiliza **PWM** para atuação e **ADC** para leitura do tacogerador, 
 
 Além do firmware do ESP32, este repositório contém os dados experimentais e ferramentas de análise utilizados no relatório técnico:
 
-- **`/data`**: Arquivos `.csv` contendo os dados brutos coletados da planta (Malha Aberta, Resposta do PI e Resposta do Polinomial).
-- **`/analysis`**: Scripts em **Python** (`.py`) utilizados para processar os CSVs, calcular métricas (tempo de subida, overshoot) e gerar os plots comparativos.
-- **`/src`**: Código fonte do firmware (ESP-IDF).
+- **`/analises`**: Arquivos `.csv` contendo os dados brutos coletados da planta (Malha Aberta, Resposta do PI e Resposta do Polinomial) e Scripts em **Python** (`.py`) utilizados para processar os CSVs e gerar os plots comparativos.
+- **`/esp32_motor_lab`**: Código fonte do firmware (ESP-IDF).
 
 ---
 
@@ -89,4 +88,27 @@ Além do firmware do ESP32, este repositório contém os dados experimentais e f
 
 - Defina o Setpoint (Tensão Alvo) ou Duty Cycle.
 
--Visualize a resposta em tempo real.
+- Visualize a resposta em tempo real.
+
+---
+
+### 2. Análise de Dados (Python)
+Para reproduzir os gráficos do relatório:
+
+1. Navegue até a pasta de análise:
+
+    ```bash
+    cd analises
+    ```
+2. Instale as dependências (se necessário):
+    ```bash
+    pip install pandas matplotlib scipy
+3. Execute o script desejado (certifique-se que os arquivos .csv estão na pasta correta). Ex:
+    ```bash
+    python plots_analise.py
+    ```
+---
+
+👨‍🏫 Professores: Lucas Silva Oliveira e Luís Filipe Pereira Silva
+
+👩‍💻 Autores: Pedro Freitas & Regiane Pereira
