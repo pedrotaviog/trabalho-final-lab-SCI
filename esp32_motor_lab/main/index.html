@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Controle ESP32</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f4f9; text-align: center; padding: 10px; margin: 0; }
+    h3 { color: #333; margin-bottom: 10px; }
+    
+    .card { 
+      background: white; 
+      padding: 20px; 
+      margin: 10px auto; 
+      max-width: 900px; 
+      border-radius: 12px; 
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+    }
+    
+    .chart-container { 
+      position: relative; 
+      height: 350px; 
+      width: 100%; 
+      border: 1px solid #e0e0e0; 
+      background: #fafafa; 
+      margin-bottom: 20px; 
+      border-radius: 8px;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    
+    .kpi-box { display: flex; justify-content: space-around; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+    .kpi { 
+      background: #f8f9fa; 
+      padding: 15px; 
+      border-radius: 8px; 
+      min-width: 100px; 
+      flex: 1; 
+      border-bottom: 3px solid #007bff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .kpi span { display: block; font-size: 1.5em; font-weight: bold; color: #2c3e50; }
+    .kpi label { font-size: 0.9em; color: #7f8c8d; font-weight: 500; text-transform: uppercase; }
+    
+    .ctrl-panel { 
+      display: grid; 
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+      gap: 15px; 
+      background: #f1f3f5; 
+      padding: 20px; 
+      border-radius: 8px; 
+    }
+    .ctrl-group { text-align: left; }
+    label { display: block; font-size: 0.85em; font-weight: bold; margin-bottom: 5px; color: #495057; }
+    
+    input, select { 
+      width: 100%; 
+      padding: 10px; 
+      border: 1px solid #ced4da; 
+      border-radius: 5px; 
+      box-sizing: border-box; 
+      font-size: 1em;
+    }
+    input:focus, select:focus { outline: none; border-color: #80bdff; }
+    
+    button { 
+      width: 100%; 
+      padding: 12px; 
+      border: none; 
+      border-radius: 5px; 
+      cursor: pointer; 
+      font-weight: bold; 
+      background: #007bff; 
+      color: white; 
+      margin-top: 5px; 
+      transition: background 0.2s;
+    }
+    button:hover { background: #0056b3; }
+    button.secondary { background: #6c757d; }
+    button.secondary:hover { background: #5a6268; }
+
+    .kpi.v { border-color: #0056b3; } 
+    .kpi.sp { border-color: #28a745; } 
+    .kpi.d { border-color: #dc3545; } 
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3>Monitor de Controle</h3>
+    
+    <div class="kpi-box">
+      <div class="kpi v"><label>Tensão (PV)</label><span id="valV">-- V</span></div>
+      <div class="kpi sp"><label>Setpoint (SP)</label><span id="valSP">-- V</span></div>
+      <div class="kpi d"><label>Duty Cycle (MV)</label><span id="valD">-- %</span></div>
+    </div>
+    
+    <div class="chart-container"><canvas id="myCanvas"></canvas></div>
+    
+    <div class="ctrl-panel">
+      <div class="ctrl-group">
+        <label>Modo de Controle</label>
+        <select id="selMode" onchange="toggleDuty()">
+          <option value="0">0. Manual (Malha Aberta)</option>
+          <option value="1">1. Auto (Síntese Direta + Filtro)</option>
+          <option value="2">2. Auto (Polinomial)</option>
+        </select>
+      </div>
+      
+      <div class="ctrl-group">
+        <label>Setpoint Desejado (V)</label>
+        <input type="number" id="inpSP" step="0.1" value="1.0" min="0" max="3.3">
+      </div>
+      
+      <div class="ctrl-group">
+        <label>Duty Manual (%)</label>
+        <input type="number" id="inpDuty" step="1" value="40" min="0" max="100">
+      </div>
+      
+      <div class="ctrl-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
+        <button onclick="sendParams()">APLICAR PARÂMETROS</button>
+        <button class="secondary" onclick="downloadCSV()">BAIXAR DADOS (CSV)</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const cvs = document.getElementById('myCanvas');
+    const ctx = cvs.getContext('2d');
+    
+    function resizeCanvas() {
+        cvs.width = cvs.offsetWidth;
+        cvs.height = cvs.offsetHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas(); 
+
+    const maxPoints = 300; 
+    let dataV = [], dataSP = [], dataD = [];
+    let simTime = 0.0; 
+    let visualV = 0; 
+    let visualD = 0;
+
+    // --- CONFIGURAÇÃO DE SUAVIÇÃO VISUAL ---
+    // 0.05 a 0.15 é bom.
+    const alphaVisual = 0.05; 
+
+    // --- CONFIGURAÇÃO DA ESCALA ---
+    const maxVoltageScale = 3.5; // Topo do gráfico (V)
+
+    function drawChart() {
+        const w = cvs.width; 
+        const h = cvs.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // --- EIXO Y (TENSÃO) ---
+        ctx.strokeStyle = '#eee'; 
+        ctx.lineWidth = 1; 
+        ctx.fillStyle = "#999"; 
+        ctx.font = "11px Arial";
+        ctx.beginPath();
+        
+        // Loop de 0.5 em 0.5 até 3.5V
+        for(let v = 0; v <= maxVoltageScale; v += 0.5) {
+            // Calcula posição Y (Invertida: 0 embaixo, h em cima)
+            let y = h - (v / maxVoltageScale) * h;
+            
+            ctx.moveTo(0, y); 
+            ctx.lineTo(w, y);
+            ctx.fillText(v.toFixed(1) + "V", 5, y - 3);
+        }
+        ctx.stroke();
+
+        if (dataV.length < 2) return;
+        const xStep = w / (maxPoints - 1);
+
+        function plot(data, color, maxVal) {
+            ctx.beginPath();
+            ctx.strokeStyle = color; 
+            ctx.lineWidth = 2; 
+            
+            for (let i = 0; i < data.length; i++) {
+                let x = w - (i * xStep); 
+                let val = data[data.length - 1 - i];
+                let y = h - (val / maxVal) * h;
+                
+                if (i===0) ctx.moveTo(x, y); 
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+        
+        plot(dataD, '#dc3545', 100);             // Duty (0-100%)
+        plot(dataSP, '#28a745', maxVoltageScale); // Setpoint (0-3.5V)
+        plot(dataV,  '#0056b3', maxVoltageScale); // Tensão (0-3.5V)
+    }
+
+    async function loop() {
+      try {
+        const res = await fetch('/data');
+        const json = await res.json();
+        
+        if(json.samples.length > 0) {
+          json.samples.forEach(s => {
+            if (visualV === 0 && s.v > 0) visualV = s.v;
+            if (visualD === 0 && s.d > 0) visualD = s.d;
+
+            // Filtro Super Suave para a Tela
+            visualV = alphaVisual * s.v + (1 - alphaVisual) * visualV;
+            visualD = alphaVisual * s.d + (1 - alphaVisual) * visualD;
+
+            dataV.push(visualV);   
+            dataSP.push(s.sp);     
+            dataD.push(visualD);   
+            
+            simTime += 0.01; 
+            // CSV continua BRUTO (Fiel ao sensor)
+            window.logData = window.logData || [];
+            window.logData.push([simTime.toFixed(2), s.sp, s.v, s.d]);
+          });
+
+          while(dataV.length > maxPoints) { 
+             dataV.shift(); dataSP.shift(); dataD.shift(); 
+          }
+
+          drawChart();
+
+          const last = json.samples[json.samples.length-1];
+          document.getElementById('valV').innerText = visualV.toFixed(2) + " V";
+          document.getElementById('valSP').innerText = last.sp.toFixed(2) + " V";
+          document.getElementById('valD').innerText = visualD.toFixed(1) + " %";
+        }
+      } catch(e) { console.log("Aguardando...", e); }
+    }
+
+    function toggleDuty() {
+        const mode = document.getElementById('selMode').value;
+        const inpDuty = document.getElementById('inpDuty');
+        inpDuty.disabled = (mode != "0");
+        inpDuty.style.opacity = (mode != "0") ? "0.5" : "1";
+    }
+
+    async function sendParams() {
+      const mode = document.getElementById('selMode').value;
+      const sp = document.getElementById('inpSP').value;
+      const duty = document.getElementById('inpDuty').value;
+      await fetch(`/set?mode=${mode}&sp=${sp}&duty=${duty}`);
+    }
+    
+    function downloadCSV() {
+        let csv = "Tempo (s),Setpoint (V),Tensao (V),Duty (%)\n";
+        if(window.logData) {
+            csv += window.logData.map(e => e.join(",")).join("\n");
+        }
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "dados_finais_controle.csv"; a.click();
+    }
+
+    setInterval(loop, 150); 
+    toggleDuty(); 
+  </script>
+</body>
+</html>
